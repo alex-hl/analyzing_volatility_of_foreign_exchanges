@@ -1,0 +1,434 @@
+---
+output:
+  pdf_document: 
+      latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Part 2: Foreign Exchange Rates Confidence Intervals
+
+## Introduction
+
+### Analysis Goal
+
+The goal of this analysis is to explore degrees of uncertainty for Canadian 
+foreign exchange rates using confidence intervals. This will be done using 
+EUR/CAD and USD/CAD exchange rates. 
+
+Currency exchange rate is important because it determines a nation's economic 
+health. In other words, exchange rates informs us about the well-being of a 
+country's citizens. The Canadian economic strength affects the value of its 
+dollar relative to other countries. Specifically, variables such as interest 
+rates, inflation rates, or even demand for financial assets (bonds, stocks, 
+CDs).
+
+One might not be interested about exchange rates, or economics in general. 
+Nevertheless, any Canadian should know what their Canadian Dollars are worth. 
+If you travel in a foreign country, you might need to exchange more or less 
+Canadian money to buy foreign currency. If you are interested in diversifying 
+your portfolio with foreign assets, you should also be mindful of foreign 
+exchange rates, which raises the following question: why is it important for 
+Canadian investors to be aware of the statistical notion of Foreign Exchange 
+Rates Confidence Intervals. 
+
+We will later extensively define 'confidence intervals' but, in short, it is a 
+method which shows a potential range of future prices. To answer the previous 
+question, a Canadian investor who is looking to buy foreign assets would benefit 
+from knowing the potential range of how much it cost him to buy US dollars if 
+he is looking to buy U.S stocks. In this case, the investor would want to know 
+the confidence interval for USD/CAD exchange rates, which we will analyze in the 
+following sections using a technique called critical values. Additionally, 
+confidence intervals are quite relevant during the COVID-19 crisis, as both 
+domestic and foreign central banks apply monetary policies, which makes exchange 
+rates more volatile. Therefore, we will also need to calculate a confidence 
+interval for variance of exchange rates using a technique called bootstrapping 
+which will be defined in later sections.
+
+### About Exchange Rates
+
+In order to understand the following analysis, one must understand how exchange 
+rates work. The Bank of Canada straightforwardly explains whether a stronger or 
+weaker dollar is better. \newline
+
+A stronger dollar:
+
+* is good if your business needs a lot of imports, or you are shopping or 
+traveling abroad.
+* is bad if your business depends on exports, or on visitors coming to Canada.
+
+A weaker dollar:
+
+* is good if your business depends on exports, or on visitors coming to Canada.
+* is bad if your business needs a lot of imports, or if you are shopping or 
+traveling abroad. 
+
+> (*1. “Understanding Exchange Rates.”*)  
+
+### Hypothesis
+
+
+Since quite a large sample will be used for the analysis, we 
+hypothesize that the confidence intervals will be close to the truth for both the critical value and empirical bootstrap methods.
+
+## Data
+
+The data that will be used for this analysis are published on Statistics Canada by the Bank of Canada. 
+It provides information about 27 different exchange rates for the Canadian 
+dollar (*2. Statistics Canada. Daily Average Foreign Exchange Rates*). It has a historical record of daily average prices for all these currencies 
+in terms of CAD. The average daily price is recorded because currency prices 
+constantly fluctuate.
+
+```{r, echo=FALSE,comment=NA, message=FALSE, error=FALSE, warning=FALSE}
+library(tidyverse)
+library(patchwork)
+library(xtable)
+library(statcanR)
+
+mydata <- statcan_data("33-10-0036-01", "eng")
+```
+
+### Cleaning the data 
+
+The original data had 16 columns with variables such as the reference date, 
+scalar id, status, coordinate, geography, currency, or even value. We are only 
+interested in the currency, and value variables. The currency column has 27 
+different currencies mixed together, which were sorted by date. 
+
+Note the original data has records since 1981 until today. From 1981 to 2017, only the 
+"Canadian-Dollar Effective Exchange Rate Index (CERI)" was recorded 
+(*3.“Canadian Effective Exchange Rates.”*). It ceased in 2017 which from then on, specific 
+currency were recorded from 2017 to today (*4. “BOC Announces Details of Forthcoming Changes”*). Thus we have a sample of specific 
+currencies of about 1000 daily averages recorded. There were not more values, 
+because weekends are recorded as zeros due to foreign exchange markets being 
+closed. We of course removed these values in order to not unnecessarily skew the 
+results. There were also about 20 non recorded values which could be due to 
+holidays. These were removed. Finally, the data were sorted in order to be left 
+with our two currencies of interest for which we created two distinct variables: 
+EUR/CAD and USD/CAD. 
+
+```{r, echo=FALSE,comment=NA,message=FALSE}
+
+# EUR/CAD exchange rates
+
+eur <- mydata %>% 
+    dplyr::select(Currency = `Type of currency`,
+                value = VALUE,
+                date = REF_DATE) %>%
+  filter(Currency == "European euro, daily average" & value != 0 & !is.na(value))
+
+eurplot <- ggplot(eur, aes(x=value)) + 
+  geom_histogram(fill="dodgerblue3", color="white", bins =70) + 
+  geom_vline(aes(xintercept=mean(value)),
+             color="black", linetype="solid", size=1) +
+  labs(x="EUR/CAD",
+       y="Count",
+       title="European euro, daily averages from 2017-01-03 to Today")
+```
+
+
+```{r, echo=FALSE,comment=NA,message=FALSE}
+
+# USD/CAD exchange rates
+
+usd <- mydata %>% 
+    dplyr::select(Currency = `Type of currency`,
+                value = VALUE,
+                date = REF_DATE) %>%
+  filter(Currency == "U.S. dollar, daily average" & value != 0 & !is.na(value))
+
+usdplot<- ggplot(usd, aes(x=value)) + 
+  geom_histogram(fill="mediumaquamarine", color="white", bins =70) + 
+  geom_vline(aes(xintercept=mean(value)),
+             color="black", linetype="solid", size=1) +
+  labs(x="USD/CAD",
+       y="Count",
+       title="U.S. dollar, daily averages from 2017-01-03 to Today")
+```
+
+### Definition of the Variables that will be used extensively
+
+Exchange rates are expressed as 1 unit of the foreign currency converted into Canadian dollars.
+
+EUR/CAD: This variable defines how much Canadian dollar is needed in order to 
+buy 1 euro on a certain day. For example, as of 2021-03-17, 1.4858 CAD = 1 EUR.
+
+USD/CAD:  This variable defines how much Canadian dollar is needed in order to 
+buy 1 U.S dollar on a certain day. For example, as of 2021-03-17, 1.2465 CAD = 1 USD. 
+
+Note that these variables have 4 decimals places as in most cases, the exchange 
+rate is quoted to four decimal places (*5. “Background Information on Foreign Exchange Rates.”*). Nevertheless, we will break this rule when analyzing key statistics or confidence intervals for more accurate analysis. 
+
+### Numerical Summary of EUR/CAD and USD/CAD
+
+```{r, echo=FALSE,comment=NA,message=FALSE}
+
+# Numerical summaries with both currencies
+
+options(xtable.comment = FALSE)
+
+temp <- mydata %>% 
+    dplyr::select(Currency = `Type of currency`,
+                value = VALUE,
+                date = REF_DATE) %>%
+  filter(Currency =="U.S. dollar, daily average" | Currency =="European euro, daily average") %>%
+  filter(value != 0 & !is.na(value))
+
+
+summaryboth <- xtable(x = temp %>% 
+                        group_by(Currency) %>%
+                        summarise(
+                          Mean = mean(value),
+                          Var = var(value),
+                          Min = min(value),
+                          Q1 = quantile(value, 0.25)[[1]],
+                          Median = median(value),
+                          Q3 = quantile(value, c(0.75)[[1]]),
+                          Max = max(value)),
+                      caption = 'Numerical Summaries for EUR/CAD and USD/CAD daily averages',
+                      digits = 5
+                      )
+```
+
+Let's calculate a few statistics about both exchange rates: 
+
+`r summaryboth` 
+
+First, note that the minimum for both EUR/CAD and USD/CAD were recorded 
+as 1.3832 EUR and  1.2128 USD for 1 CAD on 2017-02-14 for the euro and 2017-09-11 for the U.S dollar. This is 
+approximately during the same period, meaning February 2017 was a time where the Canadian dollar was strong;
+Thus Canada was at a higher level of economic health compared to other time intervals.
+
+On the contrary, the max for EUR/CAD was recorded as 1.6124 on 2018-03-19. The 
+max for the USD/CAD was recorded as 1.4496 on 2020-03-18. This is interesting 
+because there are 2 years between these two dates. We said earlier that monetary 
+policy do impact the exchange rates, whether they are applied by the domestic or foreign 
+central banks. 
+
+Furthermore, note the means of both currencies. It is 1.5042 for the European euro, daily average 
+and, 1.3134 for the  U.S. dollar, daily average. Even though high precision is important for 
+currency records, we can still state that both means are close their respective medians of 
+1.5072 EUR and 1.3163 USD. These are nice to keep in mind as we will calculate 
+confidence intervals for the mean in the next sections. 
+
+Finally, we also take note of the variances for U.S dollar and EUR daily averages. 
+They are respectively 0.0019 and 0.0015. The EUR/CAD has higher variance. This is probably due to 
+the economic situations of Europe and Canada, varying more relative to each other, and/or their central banks 
+applying distinct monetary policies resulting in greater volatility in the EUR/CAD exchange as opposed to the 
+USD/CAD. These are also nice to keep in mind as we will calculate confidence intervals for the variance in later sections.
+
+### Visualizing the Data
+
+Let's plot histograms for our data where both currencies have about 1,050 records:
+
+```{r, echo=FALSE,comment=NA,message=FALSE, fig.height= 5.8}
+eurplot / usdplot
+```
+
+The black vertical lines represent the means calculated earlier. The European euro, 
+daily averages graph shows that large chunks of data are spread out between 1.45 to 1.57. 
+It is visually hard to tell if the EUR/CAD data are more right or left skewed. The U.S. dollar, 
+daily averages graph seems a little right skewed. As opposed to the EUR/CAD, the U.S dollar 
+looks more concentrated around its mean. 
+
+The short previous graph analysis did not give us much information. This is why in the next section, 
+we will calculate confidence intervals for the mean and variance via critical values and 
+empirical bootstrapping respectively. Explanations of all these concepts are in the following 
+'Methods' section. 
+
+## Methods: Confidence Intervals 
+
+In one sentence, a confidence interval is a set of values within which we are reasonably confident our true value exists.
+More specifically, a confidence interval is how much uncertainty there is with any particular statistic. Confidence intervals are often used with a margin of error. It tells you how confident you can be that the results of a poll or survey reflect what you would expect to find if it were possible to survey the entire population. Confidence intervals are essentially connected to confidence levels.
+
+Mathematically, the notation for a confidence interval is defined as follows: 
+
+> $(l_n, u_n)$ where $l_n = g(x_1,...,x_n)$ and $u_n = h(x_1,...,x_n)$, is called a $100\gamma\%$ 
+confidence interval for $\theta$. The number $\gamma$ is called the confidence level.
+(*6. Dekking, Michel, et al.*)
+
+This might seem a bit mathematically rigorous, so we will not dive deeper into the theory of confidence intervals, keeping the explanations simple for the general reader to understand. We simply want to find these intervals, but we  still need 
+to understand the methods used to do so. Two common methods will be used. 
+
+1. Critical values in order to find a confidence interval for the mean of EUR/CAD and USD/CAD daily averages. The parameter of interest is the mean $\mu$ which is defined by the expected value of a population. The confidence interval will give us a range of where this value will likely fall. 
+2. Empirical bootstrapping in order to find a confidence interval for the variance of EUR/CAD and USD/CAD daily averages. The parameter of interest is the variance $\sigma^2$ which is a measure of how far apart a set of numbers are from their mean value. The confidence interval will give us a range of where this value will likely fall. 
+
+### First Method: Critical Values of a confidence interval for the Mean 
+
+There are two ways of calculating the confidence interval $(l_n, u_n)$ for $\mu$ using critical values:
+Using the student's distribution $T$ which yields a confidence interval for $\mu$ of $(\bar{x}_n-t\frac{s_n}{\sqrt{n}},\bar{x}_n+t\frac{s_n}{\sqrt{n}})$. This method is often used when the data are not normally distributed, with unknown variance and, the sample size n, is small. Or, using the normal $Z$ distribution which yields a confidence interval for $\mu$ of $(\bar{x}_n-z\frac{\sigma}{\sqrt{n}},\bar{x}_n+z\frac{\sigma}{\sqrt{n}})$. This method is used when variance is known and the sample size n, is very large. 
+
+Our data are not exactly normal, but quite close. We will assume the data are a realization of the normal distribution. 
+Additionally, $n$ is very large: $n=1052$. This means that using $Z$ or $T$ will not make a difference due to the central limit theorem. Therefore, we will make the choice of using $Z$.
+
+Finally, our methodology for calculating a confidence interval about the mean using critical values will be as follows:
+
+* Assume the data can be interpreted as the sample realization $X_1,...,X_n$ from a $Normal(\mu,\sigma^2)$ distribution.
+* $\mu$ is the unknown parameter of interest.
+* The confidence interval $(l_n, u_n)$ will be as follows $(\bar{x}_n-z_{\alpha/2}\frac{s_n}{\sqrt{n}},\bar{x}_n+z_{\alpha/2}\frac{s_n}{\sqrt{n}})$ where $\alpha = 0.01$ in order to calculate a 99% confidence interval for $\mu$. 
+
+These steps will be done to find a 99% confidence interval of the mean for both EUR/CAD and USD/CAD daily averages. 
+
+### Second Method: Empirical Bootstrapping for a confidence interval of Variance
+
+There are different ways to perform bootstrapping. For this analysis, we will use Empirical Bootstrapping. In empirical bootstrapping, given a population, we take a reasonably sized sample, and then we repeatedly take samples of size n from the initial sample and
+calculate the statistic of interest for that sample. After calculating a statistic for each sample taken, we find
+the interval that contains the middle 90% of these statistics.
+
+In this particular bootstrap, we will find a 90% confidence interval of the variance for both EUR/CAD and USD/CAD daily averages. We will consider the data to be our original sample. Then, from that original data, we take 1000 bootstrap samples of size 1052. This is done with replacement, meaning a value could appear more than once in the bootstrap samples. 
+
+This yields a bootstrap dataset denoted by $$x_1^*,x_2^*,...,x_n^*$$
+
+We now need to calculate the variance of each of these bootstrap samples. This leaves us with a bootstrap sampling distribution of variances. 
+
+Finally, the 90% confidence interval of variances for the currency daily average is defined by the 0.05 quantile and the 0.95 quantile of the bootstrap sampling distribution. Of course, this process is done for both EUR/CAD and USD/CAD. 
+
+## Results
+
+This section applies the two methods we have defined above and seeks to interpret the results. 
+
+### Critical Values for a confidence interval of the Mean
+
+Let's calculate the confidence interval for the population mean using critical values. The results are displayed in the following table:
+
+```{r, echo=FALSE,comment=NA,message=FALSE}
+ 
+# 99% critical values confidence interval for the mean EURO
+
+xbar_eur <- mean(eur$value)
+s_eur <- sd(eur$value)
+n_eur <- nrow(eur)
+
+ci_eur_low <- xbar_eur - qnorm(0.995)*s_eur/n_eur
+ci_eur_up <- xbar_eur + qnorm(0.995)*s_eur/n_eur
+```
+
+```{r, echo=FALSE,comment=NA,message=FALSE}
+ 
+# 99% critical values confidence interval for the mean USD
+
+
+xbar_usd <- mean(usd$value)
+s_usd <- sd(usd$value)
+n_usd <- nrow(usd) 
+
+ci_usd_low <- xbar_usd - qnorm(0.995)*s_usd/n_usd
+ci_usd_up <- xbar_usd + qnorm(0.995)*s_usd/n_usd
+```
+
+```{r, echo=FALSE,comment=NA,message=FALSE}
+
+matrix(c(c("European euro, daily averages", "U.S. dollar, daily average"),c(round(ci_eur_low,5), round(ci_usd_low,5)), c(round(xbar_eur,5), round(xbar_usd,5)), c(round(ci_eur_up, 5),round(ci_usd_up,5))),  ncol = 4) %>% knitr::kable(col.names = c("Currency", "CI lower bound", "Sample Mean", "CI upper bound"),caption = '99 % CI for mean using Critical Values', format = "simple")
+```
+
+First, lets look at the EUR/CAD 99% confidence interval: (`r round(ci_eur_low,5)`,`r round(ci_eur_up, 5)`). The upper and lower bounds are very close. They can only be differentiated at the fourth decimal place. We have stated multiple times that the sample size is very large which is also the cause for such a small confidence interval with 99% confidence level. 
+
+The 99% confidence interval for USD/CAD is  (`r round(ci_usd_low,5)`,`r round(ci_usd_up, 5)`). Similar to the EUR/CAD, the confidence interval for USD/CAD is very small. Once more, this very small CI is due to the large sample size. 
+
+Note that we have also calculated the sample mean which is not to be confused with the population mean. This is just for reference. Nevertheless, the sample means of both currencies fall within the confidence intervals for the population means. Again, this is due to our sample size being very large which makes it very probable that the sample means are close to the true population means.
+
+### Empirical Bootstraping for a confidence interval of Variance
+
+Let's calculate the confidence interval for the variances using empirical bootstrapping. The results are displayed in the following table:
+
+```{r, echo=FALSE,comment=NA,message=FALSE}
+
+# 90% empirical bootstrap confidence interval variance EUR
+
+
+boot_vars_eur <- rep(NA, 1000)
+
+for (i in 1:1000){
+  boot_samp_eur <- eur %>% sample_n(size = nrow(eur), replace = TRUE)
+  boot_vars_eur[i] <- as.numeric(boot_samp_eur %>% summarize(var(value)))
+}
+
+eurvarplot <- tibble(Variances=boot_vars_eur) %>% 
+  ggplot(aes(x=Variances)) +
+  geom_histogram(fill="wheat2", color="black", bins =50)+
+  geom_vline(xintercept = quantile(boot_vars_eur, c(0.05, 0.95)), color="red", size = 0.5) +
+  labs(title= "Bootstrap Sampling Distribution of Variances for EUR/CAD", x="Variances", y="Count")
+```
+
+
+```{r, echo=FALSE,comment=NA,message=FALSE}
+
+# 90% empirical bootstrap confidence interval variance USD
+
+
+boot_vars_usd <- rep(NA, 1000)
+
+for (i in 1:1000){
+  boot_samp_usd <- usd %>% sample_n(size = nrow(usd), replace = TRUE)
+  boot_vars_usd[i] <- as.numeric(boot_samp_usd %>% summarize(var(value)))
+}
+
+usdvarplot <- tibble(Variances=boot_vars_usd) %>%
+  ggplot(aes(x=Variances)) +
+  geom_histogram(fill="wheat3", color="black", bins =50)+
+  geom_vline(xintercept = quantile(boot_vars_usd, c(0.05, 0.95)), color="red", size = 0.5) +
+  labs(title= "Bootstrap Sampling Distribution of Variances for USD/CAD", x="Variances", y="Count")
+```
+```{r, echo=FALSE,comment=NA,message=FALSE}
+matrix(c(c("European euro, daily averages", "U.S. dollar, daily average"),c(round(quantile(boot_vars_eur,0.05),6), round(quantile(boot_vars_usd,0.05),6)), c(round(var(eur$value),6), round(var(usd$value),6)), c(round(quantile(boot_vars_eur,0.95), 6),round(quantile(boot_vars_usd,0.95),6))),  ncol = 4) %>% knitr::kable(col.names = c("Currency", "CI lower bound", "Sample Variance", "CI upper bound"),caption = '90 % CI for Variance using Empirical Boostrap', format = "simple")
+
+```
+
+
+With variance as our parameter of interest, the 90% confidence interval for EUR/CAD is (`r round(quantile(boot_vars_eur, c(0.05,0.95)),6)`). This is a reasonable confidence interval which is very likely to be accurate due to the large size of the bootstrap samples. As variance is one way of measuring volatility, this confidence interval is a great suggestion to measure possible fluctuations of the EUR/CAD daily averages given a 90% confidence level (*7. Kuepper, Justin. “Volatility.”*). Note that the sample variance falls in the confidence interval of variance. 
+
+Let's visualize the EUR/CAD bootstrap sampling distribution of variances. The 90% confidence interval is plotted in red. 
+
+```{r, echo=FALSE,comment=NA,message=FALSE}
+eurvarplot
+```
+
+The bootstrap sampling distribution appears to approach a normal distribution. This is the effect of the central limit theorem. Furthermore, the confidence interval looks wide graphically. This is the result of choosing a high confidence level of 90%. 
+
+Let's now talk about the results for the USD/CAD currency. With variance as our parameter of interest, the 90% confidence interval for USD/CAD daily averages is (`r round(quantile(boot_vars_usd, c(0.05,0.95)),6)`). Again, the confidence interval is very likely to be accurate due to the sample size. Note that the sample variance falls in the confidence interval of variance. We know the sample variance for EUR/CAD prices is higher than USD/CAD. Notice that the confidence interval for EUR/CAD is larger than USD/CAD. This means there is more uncertainty about fluctuation of EUR/CAD prices rather than USD/CAD prices.
+
+Let's visualize the USD/CAD bootstrap sampling distribution of variances. The 90% confidence interval is plotted in red.
+
+```{r, echo=FALSE,comment=NA,message=FALSE}
+usdvarplot
+```
+
+This bootstrap sampling also appears to be approaching a normal distribution for the same reasons stated earlier. As we have chosen a 90% confidence level, the two red vertical lines seem far apart. Of course, if we had chosen a lower confidence level, these two vertical lines would be closer. 
+
+## Conclusions
+
+In this analysis the variables EUR/CAD and USD/CAD daily averages were analyzed. We have made use of two methods in order to find confidence intervals for different parameters of interest. 
+
+The first parameter of interest was the mean for which we found a confidence interval using critical values. The second parameter of interest was the variance for which we found a confidence interval using bootstrap sampling.
+
+The initial hypothesis was confirmed. As we have used a large sample, the results are close to the truth for both methods. To restate conclusive results found using the bootstrap sampling method, with variance as our parameter of interest, we have found the following confidence intervals:
+
+* EUR/CAD: (`r round(quantile(boot_vars_eur, c(0.05,0.95)),6)`)
+* USD/CAD: (`r round(quantile(boot_vars_usd, c(0.05,0.95)),6)`)
+
+These results can be interpreted as measure for possible volatility of the currencies. Nevertheless, there are drawbacks to measuring fluctuations using this single method as there are more tools to measure volatility. An example is standard deviation. Thus, the next step that one could take to further analyze volatility of currency prices is to estimate confidence intervals for the standard deviation. 
+
+\pagebreak
+
+_All analysis for this report was programmed using `R version 4.0.3 (2020-10-10)`._
+
+## Bibliography
+
+
+1. “Understanding Exchange Rates.” Bank of Canada, [www.bankofcanada.ca/2020/08/understanding-exchange-rates/](www.bankofcanada.ca/2020/08/understanding-exchange-rates/) (Last Accessed: March 17, 2021)
+
+2. Government of Canada, Statistics Canada. Daily Average Foreign Exchange Rates in Canadian Dollars, Bank of Canada, Government of Canada, Statistics Canada, 23 Mar. 2021, [www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=3310003601](www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=3310003601) (Last Accessed: March 17, 2021)
+
+3. “Canadian Effective Exchange Rates.” Bank of Canada, [www.bankofcanada.ca/rates/exchange/canadian-effective-exchange-rates/](“Canadian Effective Exchange Rates.” Bank of Canada, www.bankofcanada.ca/rates/exchange/canadian-effective-exchange-rates/. ) (Last Accessed: March 17, 2021)
+
+4. “Bank of Canada Announces Details of Forthcoming Changes to Its Published Foreign Exchange Rate Data.” Bank of Canada, [www.bankofcanada.ca/2016/12/bank-canada-announces-details-forthcoming-changes/](www.bankofcanada.ca/2016/12/bank-canada-announces-details-forthcoming-changes/) (Last Accessed: March 18, 2021)
+
+5. “Background Information on Foreign Exchange Rates.” Bank of Canada, [www.bankofcanada.ca/rates/exchange/background-information-on-foreign-exchange-rates/](www.bankofcanada.ca/rates/exchange/background-information-on-foreign-exchange-rates/) (Last Accessed: March 18, 2021)
+
+6. Dekking, Michel, et al. A Modern Introduction to Probability and Statistics: Understanding Why and How. Springer, 2010. (Last Accessed: March 19, 2021)
+
+7. Kuepper, Justin. “Volatility.” Investopedia, Investopedia, 4 Mar. 2021, [www.investopedia.com/terms/v/volatility.asp](www.investopedia.com/terms/v/volatility.asp) (Last Accessed: March 19, 2021)
+
+8. “ggplot2.” Function | R Documentation, [https://www.rdocumentation.org/packages/ggplot2/versions/3.3.3/topics/ggplot](https://www.rdocumentation.org/packages/ggplot2/versions/3.3.3/topics/ggplot). (Last Accessed: March 19, 2021)
